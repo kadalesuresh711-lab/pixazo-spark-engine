@@ -109,19 +109,16 @@ const SAMPLE = `(0:00)Henan की कहानी असुरा का उद
 const PROMPT_RANGE = 60;
 
 /**
- * Parallel image request lanes. Each lane sends IMAGE_BATCH prompts in one
- * round trip and the server renders them concurrently, so the real number of
- * images in flight is IMAGE_CONCURRENCY * IMAGE_BATCH (measured: one Pixazo key
- * sustains 24 concurrent Flux Schnell renders with no rate limiting, so four
- * keys comfortably carry ~96). Auto-throttles if the provider pushes back.
+ * Image pipeline shape: TEN Pixazo keys, one image per key at a time.
+ *
+ * Each lane sends IMAGE_BATCH prompts in one round trip and the server renders
+ * them concurrently, leasing a different key per image. The server never lets a
+ * key run two images at once, so exactly ten pictures are drawn in parallel.
+ * A second lane is kept only so the next batch is already queued when the first
+ * one finishes; it never increases the number of live renders.
  */
-/**
- * The browser opens at most ~6 sockets per origin, so more than 6 lanes just
- * queue in the network stack and never reach the renderer. Throughput comes
- * from batching instead: 6 lanes x 4 prompts = 24 images rendered at once.
- */
-const IMAGE_CONCURRENCY = 12;
-const IMAGE_BATCH = 8;
+const IMAGE_CONCURRENCY = 2;
+const IMAGE_BATCH = 10;
 /**
  * The server already downloads and validates every finished image (complete
  * file + entropy) before returning its URL, so re-downloading and decoding it
