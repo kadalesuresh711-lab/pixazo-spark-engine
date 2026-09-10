@@ -109,15 +109,13 @@ const SAMPLE = `(0:00)Henan की कहानी असुरा का उद
 const PROMPT_RANGE = 60;
 
 /**
- * Image pipeline shape: TEN Pixazo keys, one image per key at a time.
+ * Image pipeline shape: TEN Pixazo keys, TEN images per key at a time.
  *
  * Each lane sends IMAGE_BATCH prompts in one round trip and the server renders
- * them concurrently, leasing a different key per image. The server never lets a
- * key run two images at once, so exactly ten pictures are drawn in parallel.
- * A second lane is kept only so the next batch is already queued when the first
- * one finishes; it never increases the number of live renders.
+ * them concurrently, spreading them across the key pool. With ten lanes of ten
+ * prompts, up to a hundred pictures are drawn in parallel.
  */
-const IMAGE_CONCURRENCY = 2;
+const IMAGE_CONCURRENCY = 10;
 const IMAGE_BATCH = 10;
 /**
  * The server already downloads and validates every finished image (complete
