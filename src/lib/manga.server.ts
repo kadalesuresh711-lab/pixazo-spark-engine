@@ -1,5 +1,5 @@
 import type { Segment } from "./script";
-import { pixazoKeys, pickKey } from "./keys.server";
+import { withImageKey } from "./keys.server";
 import { textChat } from "./text-engine.server";
 import { assertActive, killableSignal, KilledError } from "./kill-switch.server";
 
