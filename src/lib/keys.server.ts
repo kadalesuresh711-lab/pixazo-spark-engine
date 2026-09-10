@@ -38,27 +38,38 @@ export function pickKey(keys: string[], slot: number, attempt = 0): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* One image per key at a time                                         */
+/* Ten images per key at a time                                        */
 /* ------------------------------------------------------------------ */
 
-/** Keys currently rendering an image. */
-const busy = new Set<string>();
-/** Callers waiting for any key to free up. */
+/** How many images one key may render simultaneously. */
+export const PER_KEY_CONCURRENCY = 10;
+
+/** In-flight renders per key. */
+const inFlight = new Map<string, number>();
+/** Callers waiting for capacity on any key. */
 const waiters: (() => void)[] = [];
+
+function load(key: string): number {
+  return inFlight.get(key) ?? 0;
+}
 
 function takeFree(keys: string[], slot: number, attempt: number): string | undefined {
   const n = keys.length;
+  let best: string | undefined;
   for (let step = 0; step < n; step++) {
     const key = pickKey(keys, slot + step, attempt);
-    if (!busy.has(key)) return key;
+    if (load(key) === 0) return key;
+    if (load(key) < PER_KEY_CONCURRENCY && (best === undefined || load(key) < load(best))) {
+      best = key;
+    }
   }
-  return undefined;
+  return best;
 }
 
 /**
- * Leases one free image key for the duration of `fn`, so a single key never
- * has two renders in flight. With ten keys configured, exactly ten images are
- * generated in parallel; an eleventh request simply waits its turn.
+ * Leases capacity on an image key for the duration of `fn`. Each key handles up
+ * to PER_KEY_CONCURRENCY renders at once, so with ten keys configured up to a
+ * hundred images are generated in parallel; anything beyond that waits.
  */
 export async function withImageKey<T>(
   slot: number,
@@ -71,11 +82,11 @@ export async function withImageKey<T>(
     await new Promise<void>((resolve) => waiters.push(resolve));
     key = takeFree(keys, slot, attempt);
   }
-  busy.add(key);
+  inFlight.set(key, load(key) + 1);
   try {
     return await fn(key, keys.indexOf(key));
   } finally {
-    busy.delete(key);
+    inFlight.set(key, Math.max(0, load(key) - 1));
     waiters.shift()?.();
   }
 }
