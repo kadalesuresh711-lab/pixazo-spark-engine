@@ -4,9 +4,9 @@ import { textChat } from "./text-engine.server";
 import { assertActive, killableSignal, KilledError } from "./kill-switch.server";
 
 const PIXAZO_URL = "https://gateway.pixazo.ai/flux-1-schnell/v1/getData";
-// A single provider attempt must settle quickly enough for the browser queue to
-// rotate keys and checkpoint. This never limits the total workflow duration.
-const IMAGE_REQUEST_TIMEOUT_MS = 45_000;
+// The gateway regularly needs 60-75s for one 1920x1088 render, so a single
+// attempt is given a generous ceiling. Anything shorter aborted good renders.
+const IMAGE_REQUEST_TIMEOUT_MS = 180_000;
 
 /**
  * Renderer-only art direction. The writing model describes only scene content;
@@ -1247,7 +1247,7 @@ function byteEntropy(buf: Uint8Array): number {
  * fall back to the full body automatically.
  */
 async function isRealImage(url: string): Promise<boolean> {
-  const gate = killableSignal(45_000);
+  const gate = killableSignal(60_000);
   const signal = gate.signal;
   try {
     const [headRes, tailRes] = await Promise.all([
@@ -1480,7 +1480,7 @@ export async function renderPanel(
 
   // The prompt as written for this line, retried in full on fresh seeds.
   let refused = false;
-  for (let round = 0; round < 2; round++) {
+  for (let round = 0; round < 3; round++) {
     tries++;
     try {
       const url = await generateImage(prompt, seed + round * 1861, slot + round, bible, 1, line);
