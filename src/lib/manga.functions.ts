@@ -114,7 +114,7 @@ export const renderBatch = createServerFn({ method: "POST" })
             }),
           )
           .min(1)
-          .max(8),
+          .max(10),
         runAt: z.number().optional(),
       })
       .parse(d),
