@@ -1335,62 +1335,65 @@ export async function generateImage(
   attempts = 6,
   line?: string,
 ): Promise<string> {
-  const keys = pixazoKeys();
   const body = composeImagePrompt(prompt, bible).slice(0, 2000);
   const negative = buildNegativePrompt(prompt, line, bible);
 
-
   let lastErr = "";
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
-    const key = pickKey(keys, slot, attempt);
     // A killed run never spends another image credit.
     assertActive();
-    const gate = killableSignal(IMAGE_REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(PIXAZO_URL, {
-        method: "POST",
-        signal: gate.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache",
-          "Ocp-Apim-Subscription-Key": key,
-        },
-        body: JSON.stringify({
-          prompt: body,
-          // Scene-aware ban list (broken anatomy, duplicate people, text,
-          // wrong time of day, out-of-period objects...). The gateway honours
-          // this field, so those guards no longer pollute the positive prompt.
-          negative_prompt: negative,
-          // Quality over speed: the maximum step count Schnell accepts, at the
-          // largest 16:9 size the gateway renders (verified: 1920x1088 comes
-          // back at that exact size, roughly twice the detail of 1344x768).
-          num_steps: 8,
-          // a fresh seed each attempt, so a blank frame is never re-rolled identically
-          seed: seed + attempt * 977,
-          width: 1920,
-          height: 1088,
-        }),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as { output?: string };
-        if (json.output) {
-          if (await isRealImage(json.output)) return json.output;
-          lastErr = "blank image rejected";
+    // One key renders one image at a time: this waits for a free key, so at
+    // most ten renders (one per configured key) are ever in flight together.
+    const url = await withImageKey(slot, attempt, async (key) => {
+      const gate = killableSignal(IMAGE_REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(PIXAZO_URL, {
+          method: "POST",
+          signal: gate.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+            "Ocp-Apim-Subscription-Key": key,
+          },
+          body: JSON.stringify({
+            prompt: body,
+            // Scene-aware ban list (broken anatomy, duplicate people, text,
+            // wrong time of day, out-of-period objects...). The gateway honours
+            // this field, so those guards no longer pollute the positive prompt.
+            negative_prompt: negative,
+            // Quality over speed: the maximum step count Schnell accepts, at the
+            // largest 16:9 size the gateway renders (verified: 1920x1088 comes
+            // back at that exact size, roughly twice the detail of 1344x768).
+            num_steps: 8,
+            // a fresh seed each attempt, so a blank frame is never re-rolled identically
+            seed: seed + attempt * 977,
+            width: 1920,
+            height: 1088,
+          }),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as { output?: string };
+          if (json.output) {
+            if (await isRealImage(json.output)) return json.output;
+            lastErr = "blank image rejected";
+          } else {
+            lastErr = "no output url";
+          }
         } else {
-          lastErr = "no output url";
+          lastErr = `${res.status} ${await res.text().catch(() => "")}`.slice(0, 300);
         }
-      } else {
-        lastErr = `${res.status} ${await res.text().catch(() => "")}`.slice(0, 300);
+        if (lastErr) console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1}: ${lastErr}`);
+      } catch (e) {
+        if (e instanceof KilledError) throw e;
+        lastErr = e instanceof Error ? e.message : String(e);
+        console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1} threw: ${lastErr}`);
+        assertActive();
+      } finally {
+        gate.release();
       }
-      if (lastErr) console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1}: ${lastErr}`);
-    } catch (e) {
-      if (e instanceof KilledError) throw e;
-      lastErr = e instanceof Error ? e.message : String(e);
-      console.warn(`[pixazo] seed=${seed} attempt ${attempt + 1} threw: ${lastErr}`);
-      assertActive();
-    } finally {
-      gate.release();
-    }
+      return null;
+    });
+    if (url) return url;
     await pause(200 * (attempt + 1));
   }
   throw new Error(`Image generation failed: ${lastErr}`);
